@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/style.css">
+   
+</head>
+<body>
+    <header>
+        <%- include('../common/header')%>
+    </header>
+    <form  action="/auth/logout"  style="float: right;">
+        <button type="submit" class="btn btn-danger" style="float: right;">Logout</button>
+  </form>
+    <div class="fixed-header mt-5" >
+        <button type="button" class="btn btn-info d-block mr-0 ml-auto">
+            <a href="/teacher_view">BACK</a>
+    
+          </button>
+       
+        <b>ADD NEW-RESULT</b><br>
+       
+    </div>
+    <form id="addForm" action="/api/teacherview/add" method="post" class="border border-warning mt-4 shadow-lg p-4 mb-4 bg-white">
+        <div class="row mb-3 mt-5">
+            <label for="rollno" class="col-sm-2 col-form-label ">RollNo.</label>
+            <div class="col-sm-10">
+                <input type="number" class="form-control" id="Rollno" name="Rollno">
+                
+            </div>
+        </div>
+        <div class="row mb-3 mt-5">
+            <label for="name" class="col-sm-2 col-form-label ">NAME</label>
+            <div class="col-sm-10">
+                <input type="text" class="form-control" id="Name" name="Name">
+                
+            </div>
+        </div>
+        <div class="row mb-3 mt-5">
+            <label for="dob" class="col-sm-2 col-form-label ">DATE OF BIRTH</label>
+            <div class="col-sm-10">
+                <input type="date" class="form-control" placeholder="dd.mm.yyyy" id="DateofBirth" name="DateofBirth">
+                
+            </div>
+        </div>
+        <div class="row mb-3 mt-3">
+            <label for="score" class="col-sm-2 col-form-label ">SCORE</label>
+            <div class="col-sm-10">
+                <input type="number" class="form-control" id="score" name="Score">
+                
+            </div>
+        </div>
+
+
+        <button type="submit" class="btn btn-success">ADD</button>
+        <button type="reset" class="btn btn-info">CLEAR</button>
+    </form>
+    <script>
+        document.getElementById('addForm').addEventListener('submit', async function (event) {
+            event.preventDefault(); // Prevent default form submission
+        
+            const formData = new FormData(this);
+            try {
+                const response = await fetch("/api/teacherview/add", {
+                    method: 'POST',
+                    body: new URLSearchParams(formData),
+                    headers: {
+                              'Content-Type': 'application/x-www-form-urlencoded'
+    }
+                });
+        
+                const data = await response.json();
+        
+                if (data.success) {
+                    alert('Student added successfully!');
+                } else {
+                    alert('Failed to add student.');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred.');
+            }
+        });
+        </script>
+</body>
+</html>
