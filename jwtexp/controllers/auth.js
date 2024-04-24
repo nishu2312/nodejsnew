@@ -1,152 +1,210 @@
+// routes/auth.js
 
-const mysql = require("mysql");
-const jwt =require('jsonwebtoken');
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { promisify } = require('util');
-
-
-const db = mysql.createConnection({
-    host:process.env.DATABASE_HOST,
-    user:process.env.DATABASE_USER,
-    password:process.env.DATABASE_PASSWORD,
-    database:process.env.DATABASE
-});
-
-
+const nodemailer = require("nodemailer");
+const crypto = require('crypto');
 
 exports.login = async (req, res, next) => {
     const { email, password } = req.body;
-  
-    // 1) Check if email and password exist
-    if (!email || !password) {
-      return res.status(400).render("login", {
-        message: 'Please provide email and password'
-      });
-    }
-  
-    // 2) Check if user exists && password is correct
-    db.query('SELECT * FROM users WHERE email = ?', [email], async (error, results) => {
-      
-      if (error) {
-        // Handle any database query errors
-        console.error(error);
-        return res.status(500).send("Internal Server Error");
-      }
 
-      if (results.length === 0) {
-        // If no results found, return invalid email message
-        return res.status(401).render("login", {
-          message: 'Invalid email or password'
+    if (!email || !password) {
+        return res.status(400).render("login", {
+            message: 'Please provide email and password'
         });
-      }
-      
-      console.log(results);
-      console.log(password);
-      const isMatch = await bcrypt.compare(password, results[0].password);
-      console.log(isMatch);
-      if(!results || !isMatch ) {
-        return res.status(401).render("login", {
-          message: 'Incorrect email or password'
+    }
+
+    try {
+        const user = await User.findOne({ email });
+
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            return res.status(401).render("login", {
+                message: 'Invalid email or password'
+            });
+        }
+
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+            expiresIn: process.env.JWT_EXPIRES_IN
         });
-      } else {
-        // 3) If everything ok, send token to client
-        const id = results[0].id;
-        console.log(id);
-        const token = jwt.sign({ id }, process.env.JWT_SECRET, {
-          expiresIn: process.env.JWT_EXPIRES_IN
-        });
-  
+
+        console.log('Here the token:',token);
+
         const cookieOptions = {
-          expires: new Date(
-            Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
-          ),
-          httpOnly: true
+            expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000),
+            httpOnly: true
         };
         res.cookie('jwt', token, cookieOptions);
-  
-        res.status(200).redirect("/logins");
-      }
-    });
-  };
-  
-exports.register = (req,res)=>{
-    console.log(req.body);
 
-    const{name,email,password,passwordConfirm}=req.body;
-    db.query('SELECT email FROM users WHERE email = ?', [email] ,async (error,results)=>{
-        if(error){
-            console.log(error);
-        }
-        
-        if(results.length > 0){
-            
-            return res.render('register',{
-                message:'That email is taken'
-            })
-        }else if(password !== passwordConfirm){
-            
-            return res.render('register',{
-                message:'password do not match'
+        res.status(200).json({
+            success: true,
+            message: 'Login successful',
+            token: token });
+      
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            message: 'Internal Server Error'
+        });
+    }
+};
+exports.forget = async (req, res) => {
+    try {
+        const {email} = req.body;
+
+        const existingUser = await User.findOne({ email });
+        console.log('user',existingUser);
+        if (!existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'No users with this email'
             });
-           
+        }
+        const resetToken = crypto.randomBytes(32).toString('hex');
+       
+
+        existingUser.resetToken = resetToken;
+        existingUser.resetTokenExpiration = Date.now() + 3600000;
+        await existingUser.save();
+
+        const resetLink = `http://localhost:5000/auth/reset/${resetToken}`;
+        console.log('resetToken',resetToken);
+        //create smtp
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.ethereal.email',
+            port: 587,
+            auth: {
+                user: 'odessa.hayes@ethereal.email',
+                pass: '8pT7bSeVy7WfX2g7mn'
+            }
+        });
+
+            // Message object
+    let message = {
+        from: 'Odessa Hayes <odessa.hayes@ethereal.email>',
+        to: 'bar <baz@example.com>',
+        subject: 'Password reset',
+        text: 'Click <a href="${resetLink}">here</a> to reset your password.',
+        html: `Click <a href="${resetLink}">here</a> to reset your password.`
+
+    };
+
+    transporter.sendMail(message, (err, info) => {
+        if (err) {
+            console.log('Error occurred. ' + err.message);
+            return process.exit(1);
         }
 
-        let hashedPassword = await bcrypt.hash(password, 8);
-        console.log(hashedPassword);
-
-        db.query('INSERT INTO users SET ?',{name:name,email:email,password:hashedPassword},(error,results)=>{
-            if(error){
-                console.log(error);
-            }else{
-                console.log(results);
-                return res.render('register',{
-                    message:'user registered'
-                });
-
-            }
-        })
-        
+        console.log('Message sent: %s', info.messageId);
+        // Preview only available when sending through an Ethereal account
+        console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
+         res.status(200).json({
+            success: true,
+            message: 'Mail sent '
+        });
     });
     
-};
-exports.isLoggedIn = async (req, res, next) => {
-    console.log(req.cookies);
-    if (req.cookies.jwt) {
-      try {
-        // 1) verify token
-        const decoded = await promisify(jwt.verify)(
-          req.cookies.jwt,
-          process.env.JWT_SECRET
-        );
-  
-        console.log("decoded");
-        console.log(decoded);
-  
-        // 2) Check if user still exists
-        db.query('SELECT * FROM users WHERE id = ?', [decoded.id], (error, result) => {
-          console.log(result)
-          if(!result) {
-            return next();
-          }
-          // THERE IS A LOGGED IN USER
-          req.user = result[0];
-          console.log(req.user);
-          // res.locals.user = result[0];
-          console.log("next")
-          return next();
-        });
-      } catch (err) {
-        return next();
-      }
-    } else {
-      next();
+       
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Internal Server Error");
     }
-  };
+};
+exports.reset = async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
 
-  exports.logout = (req, res) => {
-    res.cookie('jwt', 'logout', {
-      expires: new Date(Date.now() + 2* 1000),
-      httpOnly: true
+        const user = await User.findOne({ resetToken: token });
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired token'
+            });
+        }
+
+        // Set new password
+        user.hashedpasswordpassword = await bcrypt.hash(newPassword, 10);
+        user.normalpassword = newPassword;
+
+        user.resetToken = undefined;
+        user.resetTokenExpiration = undefined;
+        
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Password reset successful'
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Internal Server Error' });
+    }
+};
+exports.register = async (req, res) => {
+    try {
+        const { name, email, password, passwordConfirm } = req.body;
+
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'That email is taken'
+            });
+        }
+
+        if (password !== passwordConfirm) {
+            return res.status(400).json({
+                success: false,
+                message: 'Passwords do not match'
+            });
+        }
+       
+        const hashedPassword = await bcrypt.hash(password, 8);
+
+        const newUser = new User({
+            name,
+            email,
+            hashedpassword: hashedPassword,
+            normalpassword: password
+        });
+
+        await newUser.save();
+        res.status(200).json({
+            success: true,
+            message: 'User registered'
+            });
+       
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Internal Server Error");
+    }
+};
+
+exports.isLoggedIn = async (req, res, next) => {
+    try {
+        if (req.cookies.jwt) {
+            const decoded = jwt.verify(req.cookies.jwt, process.env.JWT_SECRET);
+            const user = await User.findById(decoded.id);
+
+            if (!user) {
+                return next();
+            }
+
+            req.user = user;
+            return next();
+        }
+        next();
+    } catch (err) {
+        console.error(err);
+        next();
+    }
+};
+
+exports.logout = (req, res) => {
+    res.cookie('jwt', '', {
+        expires: new Date(Date.now() + 2 * 1000),
+        httpOnly: true
     });
     res.status(200).redirect("/");
-  };
+};
